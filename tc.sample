@@ -1,0 +1,63 @@
+#!/bin/bash
+. ./tc.functions
+
+# Let's supose that you have four subnets connected to eth1 for which we want to guarantee some bandwidth.
+
+SUBNET1=192.168.0.0/16
+SUBNET2=192.168.1.0/16
+SUBNET3=192.168.2.0/16
+SUBNET4=192.168.3.0/16
+
+###########################################################
+##### SAMPLE 1
+###########################################################
+
+# First, we have to init the queuing discipline on the eth0 device.
+
+tc_init "eth0" "test" "htb"
+
+# First two subnets are guaranteed 1Mbit/sec each.
+
+tc_class 512 1000 1 1 s$SUBNET1
+tc_class 512 1000 1 1 s$SUBNET2
+
+# The other two subnets share another 1Mbit/sec.
+# Subnet #3 has maximum rate of 512kbit/sec but higher priority then subnet #4.
+
+tc_class 512 1000 1 htb
+  tc_class 512 	512 1 1 s$SUBNET3
+  tc_class 512 1000 2 1 s$SUBNET4
+tc_declass
+
+###########################################################
+##### SAMPLE 2 - using iptables fwmark
+###########################################################
+
+# Mark the packets with iptables
+
+iptables -t mangle -F
+iptables -t mangle -A PREROUTING -s $SUBNET1 -i eth1 -j MARK --set-mark 0x1
+iptables -t mangle -A PREROUTING -s $SUBNET2 -i eth1 -j MARK --set-mark 0x2
+iptables -t mangle -A PREROUTING -s $SUBNET3 -i eth1 -j MARK --set-mark 0x3
+iptables -t mangle -A PREROUTING -s $SUBNET4 -i eth1 -j MARK --set-mark 0x4
+
+# Init the queuing discipline on the eth0 device.
+
+tc_init "eth0" "test" "htb"
+
+# First two subnets are guaranteed 1Mbit/sec each.
+
+tc_class 512 1000 1 1 m0x1
+tc_class 512 1000 1 1 m0x2
+
+# The other two subnets share another 1Mbit/sec.
+# Subnet #3 has maximum rate of 512kbit/sec but higher priority then subnet #4.
+
+tc_class 512 1000 1 htb
+  tc_class 512 	512 1 1 m0x3
+  tc_class 512 1000 2 1 m0x4
+tc_declass
+
+# NOTE: it is possible to use more complex filters in tc like:
+    tc_class "$min_bandwith" "$max_bandwidth" "$class_prio" "$filter_prio" \
+        m"$iptables_mark"_s"$source_ip:$source_port"_d"$destination_ip:$destination_port"
